@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMA Crossover Backtester</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #3b82f6;
+      --text: #f8fafc;
+      --text-dim: #94a3b8;
+      --green: #10b981;
+      --red: #ef4444;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    
+    header { border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+    p.subtitle { color: var(--text-dim); font-size: 0.875rem; margin-top: 4px; }
+
+    .grid-layout { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }
+    @media (max-width: 860px) { .grid-layout { grid-template-columns: 1fr; } }
+
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+    .card-title { font-size: 1rem; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    label { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    input { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 0.9rem; }
+    input:focus { outline: none; border-color: var(--accent); }
+
+    button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 10px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 8px; }
+    button:hover { opacity: 0.9; }
+
+    .metrics-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .metric-card { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+    .metric-label { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 4px; }
+    .metric-value { font-size: 1.25rem; font-weight: 700; }
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+
+    .chart-container { position: relative; height: 350px; width: 100%; margin-bottom: 16px; }
+    .log-table-container { max-height: 220px; overflow-y: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left; }
+    th { background: #0f172a; padding: 8px 12px; color: var(--text-dim); position: sticky; top: 0; }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .tag { padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+    .tag.buy { background: rgba(16, 185, 129, 0.2); color: var(--green); }
+    .tag.sell { background: rgba(239, 68, 68, 0.2); color: var(--red); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>SMA Crossover Trading Strategy Simulator</h1>
+      <p class="subtitle">Rule: BUY when Fast SMA crosses above Slow SMA; SELL/CLOSE when Fast SMA crosses below Slow SMA.</p>
+    </header>
+
+    <div class="grid-layout">
+      <!-- Controls Panel -->
+      <aside class="card">
+        <div class="card-title">Strategy Parameters</div>
+        <div class="form-group">
+          <label for="capital">Initial Capital (₹/$)</label>
+          <input type="number" id="capital" value="100000" />
+        </div>
+        <div class="form-group">
+          <label for="days">Time Steps (Days)</label>
+          <input type="number" id="days" value="250" />
+        </div>
+        <div class="form-group">
+          <label for="fastPeriod">Fast SMA Period</label>
+          <input type="number" id="fastPeriod" value="9" />
+        </div>
+        <div class="form-group">
+          <label for="slowPeriod">Slow SMA Period</label>
+          <input type="number" id="slowPeriod" value="21" />
+        </div>
+        <button id="runBtn" onclick="runSimulation()">Run Backtest</button>
+      </aside>
+
+      <!-- Results & Visuals -->
+      <main class="card">
+        <div class="metrics-row">
+          <div class="metric-card">
+            <div class="metric-label">Final Portfolio Value</div>
+            <div class="metric-value" id="finalVal">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Strategy Return</div>
+            <div class="metric-value" id="stratReturn">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Buy & Hold Return</div>
+            <div class="metric-value" id="bhReturn">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total Trades</div>
+            <div class="metric-value" id="totalTrades">-</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Win Rate</div>
+            <div class="metric-value" id="winRate">-</div>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="priceChart"></canvas>
+        </div>
+
+        <div class="card-title" style="margin-top: 16px;">Trade Log</div>
+        <div class="log-table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Signal</th>
+                <th>Price</th>
+                <th>Shares</th>
+                <th>PnL</th>
+              </tr>
+            </thead>
+            <tbody id="tradeLog"></tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    let chartInstance = null;
+
+    // 1. Synthetic Market Data Generator (Geometric Random Walk)
+    function generatePriceData(steps, initialPrice = 1000, drift = 0.0003, volatility = 0.015) {
+      const prices = [initialPrice];
+      for (let i = 1; i < steps; i++) {
+        const shock = (Math.random() + Math.random() + Math.random() - 1.5) * 2; // Normal approximation
+        const change = prices[i - 1] * (drift + volatility * shock);
+        prices.push(Math.max(10, Math.round((prices[i - 1] + change) * 100) / 100));
+      }
+      return prices;
+    }
+
+    // 2. Technical Indicator: Simple Moving Average (SMA)
+    function calculateSMA(data, period) {
+      const sma = [];
+      for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) {
+          sma.push(null);
+        } else {
+          const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+          sma.push(Math.round((sum / period) * 100) / 100);
+        }
+      }
+      return sma;
+    }
+
+    // 3. Execution Engine & Backtester
+    function backtest(prices, fastPeriod, slowPeriod, initialCapital) {
+      const fastSMA = calculateSMA(prices, fastPeriod);
+      const slowSMA = calculateSMA(prices, slowPeriod);
+
+      let cash = initialCapital;
+      let shares = 0;
+      let inPosition = false;
+      let entryPrice = 0;
+      const trades = [];
+      const equityCurve = [];
+
+      for (let t = 0; t < prices.length; t++) {
+        const currentPrice = prices[t];
+        const prevFast = fastSMA[t - 1];
+        const prevSlow = slowSMA[t - 1];
+        const currFast = fastSMA[t];
+        const currSlow = slowSMA[t];
+
+        // Valid indicators exist
+        if (prevFast !== null && prevSlow !== null && currFast !== null && currSlow !== null) {
+          // Bullish Crossover: Fast crosses above Slow
+          if (!inPosition && prevFast <= prevSlow && currFast > currSlow) {
+            shares = Math.floor(cash / currentPrice);
+            cash -= shares * currentPrice;
+            entryPrice = currentPrice;
+            inPosition = true;
+            trades.push({ day: t, type: "BUY", price: currentPrice, shares, pnl: "-" });
+          }
+          // Bearish Crossover: Fast crosses below Slow
+          else if (inPosition && prevFast >= prevSlow && currFast < currSlow) {
+            cash += shares * currentPrice;
+            const pnl = Math.round((currentPrice - entryPrice) * shares * 100) / 100;
+            trades.push({ day: t, type: "SELL", price: currentPrice, shares, pnl });
+            shares = 0;
+            inPosition = false;
+          }
+        }
+
+        const totalEquity = cash + shares * currentPrice;
+        equityCurve.push(Math.round(totalEquity));
+      }
+
+      // Force close position on final day for accounting
+      if (inPosition) {
+        const finalPrice = prices[prices.length - 1];
+        cash += shares * finalPrice;
+        const pnl = Math.round((finalPrice - entryPrice) * shares * 100) / 100;
+        trades.push({ day: prices.length - 1, type: "SELL (CLOSE)", price: finalPrice, shares, pnl });
+        shares = 0;
+      }
+
+      return { fastSMA, slowSMA, trades, equityCurve, finalCapital: cash };
+    }
+
+    // 4. Controller & Chart Renderer
+    function runSimulation() {
+      const initialCapital = parseFloat(document.getElementById("capital").value);
+      const days = parseInt(document.getElementById("days").value);
+      const fastP = parseInt(document.getElementById("fastPeriod").value);
+      const slowP = parseInt(document.getElementById("slowPeriod").value);
+
+      if (fastP >= slowP) {
+        alert("Fast SMA period must be less than Slow SMA period.");
+        return;
+      }
+
+      const prices = generatePriceData(days);
+      const { fastSMA, slowSMA, trades, equityCurve, finalCapital } = backtest(prices, fastP, slowP, initialCapital);
+
+      // Performance Metrics Calculation
+      const stratReturn = ((finalCapital - initialCapital) / initialCapital) * 100;
+      const bhReturn = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100;
+      const closedTrades = trades.filter(tr => typeof tr.pnl === "number");
+      const winningTrades = closedTrades.filter(tr => tr.pnl > 0);
+      const winRate = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
+
+      // Update UI Metrics
+      document.getElementById("finalVal").textContent = finalCapital.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      
+      const stratEl = document.getElementById("stratReturn");
+      stratEl.textContent = `${stratReturn.toFixed(2)}%`;
+      stratEl.className = `metric-value ${stratReturn >= 0 ? "pos" : "neg"}`;
+
+      const bhEl = document.getElementById("bhReturn");
+      bhEl.textContent = `${bhReturn.toFixed(2)}%`;
+      bhEl.className = `metric-value ${bhReturn >= 0 ? "pos" : "neg"}`;
+
+      document.getElementById("totalTrades").textContent = closedTrades.length;
+      document.getElementById("winRate").textContent = `${winRate.toFixed(1)}%`;
+
+      // Render Trade Log Table
+      const logBody = document.getElementById("tradeLog");
+      logBody.innerHTML = "";
+      trades.forEach(t => {
+        const row = document.createElement("tr");
+        const pnlDisplay = typeof t.pnl === "number" ? `${t.pnl >= 0 ? "+" : ""}${t.pnl}` : t.pnl;
+        const pnlColor = typeof t.pnl === "number" ? (t.pnl >= 0 ? "pos" : "neg") : "";
+        row.innerHTML = `
+          <td>${t.day}</td>
+          <td><span class="tag ${t.type.includes("BUY") ? "buy" : "sell"}">${t.type}</span></td>
+          <td>${t.price}</td>
+          <td>${t.shares}</td>
+          <td class="${pnlColor}">${pnlDisplay}</td>
+        `;
+        logBody.appendChild(row);
+      });
+
+      // Render Multi-Axis Chart
+      renderChart(days, prices, fastSMA, slowSMA, trades, equityCurve);
+    }
+
+    function renderChart(days, prices, fastSMA, slowSMA, trades, equityCurve) {
+      const labels = Array.from({ length: days }, (_, i) => `Day ${i}`);
+      const ctx = document.getElementById("priceChart").getContext("2d");
+
+      if (chartInstance) chartInstance.destroy();
+
+      // Plot markers for execution points
+      const buyPoints = Array(days).fill(null);
+      const sellPoints = Array(days).fill(null);
+      trades.forEach(t => {
+        if (t.type === "BUY") buyPoints[t.day] = t.price;
+        if (t.type.includes("SELL")) sellPoints[t.day] = t.price;
+      });
+
+      chartInstance = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Price",
+              data: prices,
+              borderColor: "#64748b",
+              borderWidth: 1.5,
+              pointRadius: 0,
+              yAxisID: "yPrice"
+            },
+            {
+              label: "Fast SMA",
+              data: fastSMA,
+              borderColor: "#38bdf8",
+              borderWidth: 1.5,
+              pointRadius: 0,
+              yAxisID: "yPrice"
+            },
+            {
+              label: "Slow SMA",
+              data: slowSMA,
+              borderColor: "#f59e0b",
+              borderWidth: 1.5,
+              pointRadius: 0,
+              yAxisID: "yPrice"
+            },
+            {
+              label: "Buy Signal",
+              data: buyPoints,
+              borderColor: "#10b981",
+              backgroundColor: "#10b981",
+              pointStyle: "triangle",
+              pointRadius: 6,
+              showLine: false,
+              yAxisID: "yPrice"
+            },
+            {
+              label: "Sell Signal",
+              data: sellPoints,
+              borderColor: "#ef4444",
+              backgroundColor: "#ef4444",
+              pointStyle: "rectRot",
+              pointRadius: 6,
+              showLine: false,
+              yAxisID: "yPrice"
+            },
+            {
+              label: "Equity Curve",
+              data: equityCurve,
+              borderColor: "#8b5cf6",
+              borderWidth: 2,
+              borderDash: [4, 4],
+              pointRadius: 0,
+              yAxisID: "yEquity"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            x: { grid: { color: "#334155" }, ticks: { color: "#94a3b8" } },
+            yPrice: {
+              type: "linear",
+              position: "left",
+              grid: { color: "#334155" },
+              ticks: { color: "#94a3b8" },
+              title: { display: true, text: "Asset Price", color: "#94a3b8" }
+            },
+            yEquity: {
+              type: "linear",
+              position: "right",
+              grid: { drawOnChartArea: false },
+              ticks: { color: "#8b5cf6" },
+              title: { display: true, text: "Portfolio Value", color: "#8b5cf6" }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: "#f8fafc" } }
+          }
+        }
+      });
+    }
+
+    // Auto-run default view on page load
+    window.onload = runSimulation;
+  </script>
+</body>
+</html>
